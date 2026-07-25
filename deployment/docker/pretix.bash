@@ -7,6 +7,9 @@ export HOME=/pretix
 AUTOMIGRATE=${AUTOMIGRATE:-yes}
 NUM_WORKERS_DEFAULT=$((2 * $(nproc)))
 export NUM_WORKERS=${NUM_WORKERS:-$NUM_WORKERS_DEFAULT}
+# Concurrencia de celery. Por defecto celery arranca un proceso por núcleo, lo
+# que en un servidor grande compartido se come varios GB de RAM sin necesidad.
+export CELERY_CONCURRENCY=${CELERY_CONCURRENCY:-$(nproc)}
 
 if [ ! -d /data/logs ]; then
     mkdir /data/logs;
@@ -43,7 +46,7 @@ fi
 
 if [ "$1" == "taskworker" ]; then
     shift
-    exec celery -A pretix.celery_app worker -l info "$@"
+    exec celery -A pretix.celery_app worker -l info --concurrency="$CELERY_CONCURRENCY" "$@"
 fi
 
 if [ "$1" == "upgrade" ]; then

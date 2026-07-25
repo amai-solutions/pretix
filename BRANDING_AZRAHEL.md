@@ -11,8 +11,14 @@ plataforma de entradas de **Azrahel del Mayor** (https://entradas.azrahel.amai.r
 
 ## Qué cambia esta rama respecto a upstream
 
-Solo **assets estáticos**. Cero cambios en código Python, plantillas o lógica de negocio — para que
-el rebase sobre versiones nuevas de pretix entre limpio.
+Assets estáticos + una línea del arranque. Cero cambios en código Python, plantillas o lógica de
+negocio — para que el rebase sobre versiones nuevas de pretix entre limpio.
+
+> **Por qué se toca `pretix.bash`:** el entrypoint oficial arranca gunicorn con `2 × nproc` workers y
+> celery con un proceso por núcleo. En un servidor grande y compartido (32 núcleos) eso son ~58
+> procesos y **más de 11 GB de RAM** para una instancia con cinco eventos. Ahora `CELERY_CONCURRENCY`
+> se puede fijar por entorno, igual que `NUM_WORKERS`. Sin valor, el comportamiento es idéntico al de
+> upstream.
 
 | Fichero | Cambio |
 |---|---|
@@ -21,6 +27,7 @@ el rebase sobre versiones nuevas de pretix entre limpio.
 | `src/pretix/static/pretixbase/img/favicon*.{png,ico}` | emblema circular AΩGR sobre navy |
 | `src/pretix/static/pretixbase/img/icons/*` | idem (apple-touch, android-chrome, mstile) |
 | `src/pretix/static/pretixbase/email/thumb_simple_logo.png` | logo de cabecera de emails |
+| `deployment/docker/pretix.bash` | **única excepción no-asset**: hace configurable la concurrencia de celery (`CELERY_CONCURRENCY`), igual que ya lo era la de gunicorn (`NUM_WORKERS`) |
 
 Origen de los assets: `logo-azrahel.png` (1024×557), extraído de azraheldelmayor.com.
 El emblema circular es el recorte `bbox (19, 18, 505, 539)` de ese PNG — mismo criterio que se usó en
