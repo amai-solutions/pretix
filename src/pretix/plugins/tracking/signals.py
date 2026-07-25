@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 # Anything else is dropped and logged instead of being embedded.
 ID_RE = re.compile(r'^[A-Za-z0-9_\-]{1,64}$')
 
+# Marks that this visitor already got an InitiateCheckout for the checkout they are in.
+SESSION_KEY_CHECKOUT = '_tracking_checkout_started'
+
 # setting key -> cookie provider identifier the consent dialog uses
 VENDOR_OF_SETTING = {
     'meta_pixel_id': 'meta_pixel',
@@ -127,13 +130,18 @@ def page_events(request, event):
         step = url.kwargs.get('step')
         if step == 'payment':
             events.append({'type': 'AddPaymentInfo', 'data': content})
-        else:
-            events.append({'type': 'InitiateCheckout', 'data': content})
+        elif step != 'confirm':
+            # The checkout has several steps and html_head runs on all of them, so without this the
+            # funnel would report one InitiateCheckout per step instead of one per buyer.
+            if not request.session.get(SESSION_KEY_CHECKOUT):
+                request.session[SESSION_KEY_CHECKOUT] = True
+                events.append({'type': 'InitiateCheckout', 'data': content})
     elif name == 'event.order' and request.GET.get('thanks'):
         # pretix redirects here with ?thanks=1 (checkout) or ?thanks=yes (payment retry) once an
         # order is placed, so this is the one page that means "conversion".
         purchase = _purchase_data(request, event)
         if purchase:
+            request.session.pop(SESSION_KEY_CHECKOUT, None)
             events.append({'type': 'Purchase', 'data': {**content, **purchase}})
     return events
 
