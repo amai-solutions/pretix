@@ -79,6 +79,7 @@ SESSION_CAMPAIGN = '_tracking_%s'
 # page would turn "landed on /bogota from an Instagram ad" into "landed on the checkout".
 SESSION_LANDING = '_tracking_landing_url'
 SESSION_REFERRER = '_tracking_referrer'
+SESSION_FBCLID_TS = '_tracking_fbclid_ts'
 
 # pretix ships a strict Content-Security-Policy: script-src is 'self' with no 'unsafe-inline'.
 # Without the entries below the tag script is refused by the browser before it runs a single line,
@@ -279,6 +280,11 @@ def remember_campaign(request):
         value = request.GET.get(key)
         if value and request.session.get(SESSION_CAMPAIGN % key) != value:
             request.session[SESSION_CAMPAIGN % key] = str(value)[:255]
+            if key == 'fbclid':
+                # Meta's _fbc cookie encodes when the click happened, and it is only written by the
+                # pixel. A click landing on a page without the pixel — the organizer listing — would
+                # otherwise reach the Conversions API with no click id at all.
+                request.session[SESSION_FBCLID_TS] = int(time.time() * 1000)
 
     if not request.session.get(SESSION_LANDING):
         request.session[SESSION_LANDING] = request.build_absolute_uri()[:1000]
@@ -442,6 +448,11 @@ def store_attribution(sender, request=None, **kwargs):
         value = request.GET.get(key) or request.session.get(SESSION_CAMPAIGN % key)
         if value:
             data[key] = str(value)[:255]
+
+    if not data.get('fbc') and data.get('fbclid'):
+        # Rebuild what the pixel would have written, using the moment the click was first seen.
+        stamp = request.session.get(SESSION_FBCLID_TS) or int(time.time() * 1000)
+        data['fbc'] = 'fb.1.%d.%s' % (stamp, data['fbclid'])
     return {'_tracking': data}
 
 
