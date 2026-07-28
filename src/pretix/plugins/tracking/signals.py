@@ -27,11 +27,14 @@ import time
 
 from django.conf import settings as django_settings
 from django.dispatch import receiver
+from django.utils.crypto import get_random_string
 
+from pretix.base.middleware import _merge_csp, _parse_csp, _render_csp
 from pretix.base.signals import order_paid
 from pretix.presale.cookies import CookieProvider, UsageClass
 from pretix.presale.signals import (
-    html_head, order_meta_from_request, register_cookie_providers,
+    html_head, order_meta_from_request, process_response,
+    register_cookie_providers,
 )
 
 from .capi import capi_purchase, capi_send, new_event_id
@@ -53,6 +56,45 @@ SESSION_KEY_CHECKOUT = '_tracking_checkout_started'
 # Written by our own script once the visitor answers the consent dialog, because consent itself
 # lives in localStorage and the server has no way to read that.
 CONSENT_COOKIE = 'pretix_tracking_consent'
+
+# pretix ships a strict Content-Security-Policy: script-src is 'self' with no 'unsafe-inline'.
+# Without the entries below the tag script is refused by the browser before it runs a single line,
+# and the vendor scripts it wants to fetch are refused too. Each vendor only widens the policy for
+# the hosts it actually needs, and only while that vendor is configured.
+CSP_BY_VENDOR = {
+    'meta_pixel': {
+        'script-src': ['https://connect.facebook.net'],
+        'img-src': ['https://www.facebook.com', 'https://connect.facebook.net'],
+        'connect-src': ['https://www.facebook.com', 'https://connect.facebook.net'],
+    },
+    'google_analytics': {
+        'script-src': ['https://www.googletagmanager.com'],
+        'img-src': ['https://www.google-analytics.com', 'https://*.google-analytics.com',
+                    'https://www.googletagmanager.com'],
+        'connect-src': ['https://www.google-analytics.com', 'https://*.google-analytics.com',
+                        'https://*.analytics.google.com', 'https://www.googletagmanager.com'],
+    },
+    'google_ads': {
+        'script-src': ['https://www.googletagmanager.com', 'https://www.googleadservices.com',
+                       'https://googleads.g.doubleclick.net'],
+        'img-src': ['https://www.google.com', 'https://googleads.g.doubleclick.net',
+                    'https://www.googleadservices.com'],
+        'connect-src': ['https://www.google.com', 'https://googleads.g.doubleclick.net'],
+        'frame-src': ['https://td.doubleclick.net', 'https://www.googletagmanager.com'],
+    },
+    'google_tag_manager': {
+        'script-src': ['https://www.googletagmanager.com', "'unsafe-inline'"],
+        'img-src': ['https://www.googletagmanager.com'],
+        'connect-src': ['https://www.googletagmanager.com'],
+    },
+}
+
+
+def csp_nonce(request):
+    """One nonce per request, shared between the injected script tag and the CSP header."""
+    if not hasattr(request, '_tracking_nonce'):
+        request._tracking_nonce = get_random_string(32)
+    return request._tracking_nonce
 
 # setting key -> cookie provider identifier the consent dialog uses
 VENDOR_OF_SETTING = {
@@ -289,7 +331,34 @@ def add_tracking_codes(sender, request=None, **kwargs):
         send_server_side(event, request, config['events'], config['meta_pixel_id'], capi_token)
 
     payload = json.dumps(config).replace('</', '<\\/')
-    return TEMPLATE.replace('__CONFIG__', payload) + get_setting(event, 'head_html')
+    return (
+        TEMPLATE.replace('__CONFIG__', payload).replace('__NONCE__', csp_nonce(request))
+        + get_setting(event, 'head_html')
+    )
+
+
+@receiver(process_response, dispatch_uid="tracking_csp")
+def extend_csp(sender, request=None, response=None, **kwargs):
+    """Open the Content-Security-Policy just enough for the vendors that are actually configured.
+
+    pretix's default policy is ``script-src 'self'``: without this the injected tag script never
+    executes and every vendor request is blocked, which looks exactly like a pixel that "does not
+    fire" with nothing in the logs to explain it.
+    """
+    vendors = configured_vendors(sender)
+    if not vendors or request is None or response is None:
+        return response
+
+    csps = {'script-src': ["'nonce-%s'" % csp_nonce(request)]}
+    for vendor in sorted(vendors):
+        for directive, sources in CSP_BY_VENDOR.get(vendor, {}).items():
+            csps.setdefault(directive, []).extend(sources)
+
+    h = _parse_csp(response['Content-Security-Policy']) if 'Content-Security-Policy' in response else {}
+    _merge_csp(h, csps)
+    if h:
+        response['Content-Security-Policy'] = _render_csp(h)
+    return response
 
 
 @receiver(order_meta_from_request, dispatch_uid="tracking_order_meta")
@@ -328,7 +397,7 @@ def order_paid_capi(sender, order=None, **kwargs):
 
 
 TEMPLATE = """
-<script type="text/javascript">
+<script type="text/javascript" nonce="__NONCE__">
 (function () {
     var cfg = __CONFIG__;
     var loaded = false;
