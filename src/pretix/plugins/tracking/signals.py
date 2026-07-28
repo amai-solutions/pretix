@@ -426,9 +426,12 @@ def extend_csp(sender, request=None, response=None, **kwargs):
     if request is not None and response is not None:
         match = getattr(request, 'resolver_match', None)
         if (match is not None and match.url_name == 'event.cart.add'
-                and 300 <= response.status_code < 400 and hasattr(request, 'session')):
-            # A successful add-to-cart always answers with a redirect; anything else is an error
-            # the visitor never got past, so it is not a cart addition.
+                and request.method == 'POST' and response.status_code < 400
+                and hasattr(request, 'session')):
+            # Only the POST counts: the GETs that follow are the poll of the asynchronous job.
+            # The status has to allow 2xx as well as 3xx — without JavaScript pretix answers the
+            # form with a redirect, but the shop's own script posts by XHR and gets a 200 back, and
+            # checking only for redirects missed every real buyer.
             request.session[SESSION_KEY_ADDTOCART] = True
 
     vendors = configured_vendors(sender)
