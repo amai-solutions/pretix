@@ -93,6 +93,17 @@ def user_data_from_order(order):
         _put(data, 'st', _hash(ia.state))
         _put(data, 'country', _hash(str(ia.country) if ia.country else None))
 
+    if 'fn' not in data:
+        # A shop that only asks for the attendee's name keeps it on the position, not on an invoice
+        # address, so without this the name never reaches Meta and the match quality suffers.
+        pos = order.positions.first()
+        if pos is not None:
+            parts = pos.attendee_name_parts or {}
+            name = parts.get('_legacy') or pos.attendee_name or ''
+            _put(data, 'fn', _hash(parts.get('given_name') or name.split(' ')[0]))
+            if len(name.split(' ')) > 1 or parts.get('family_name'):
+                _put(data, 'ln', _hash(parts.get('family_name') or name.split(' ')[-1]))
+
     # Captured from the browser at checkout time by the order_meta_from_request receiver.
     captured = (order.meta_info_data or {}).get('_tracking') or {}
     for key in ('fbp', 'fbc'):
