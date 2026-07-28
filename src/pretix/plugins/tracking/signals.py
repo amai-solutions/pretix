@@ -57,6 +57,12 @@ SESSION_KEY_CHECKOUT = '_tracking_checkout_started'
 # lives in localStorage and the server has no way to read that.
 CONSENT_COOKIE = 'pretix_tracking_consent'
 
+# Campaign parameters ride on the landing URL, never on the checkout page where the order is
+# finally created, so they have to be stashed the moment they are first seen or the attribution
+# is gone by the time the order exists.
+CAMPAIGN_KEYS = ('utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid')
+SESSION_CAMPAIGN = '_tracking_%s'
+
 # pretix ships a strict Content-Security-Policy: script-src is 'self' with no 'unsafe-inline'.
 # Without the entries below the tag script is refused by the browser before it runs a single line,
 # and the vendor scripts it wants to fetch are refused too. Each vendor only widens the policy for
@@ -240,6 +246,18 @@ def client_ip(request):
     return request.META.get('REMOTE_ADDR') or ''
 
 
+def remember_campaign(request):
+    """Stash campaign parameters the first time they are seen.
+
+    Called from ``html_head``, which runs on every shop page, so a visitor who lands with
+    ``?utm_source=…`` still carries it three pages later when the order is created.
+    """
+    for key in CAMPAIGN_KEYS:
+        value = request.GET.get(key)
+        if value and request.session.get(SESSION_CAMPAIGN % key) != value:
+            request.session[SESSION_CAMPAIGN % key] = str(value)[:255]
+
+
 def browser_identifiers(request):
     """The Meta click/browser ids, plus what identifies this request to the Graph API."""
     data = {
@@ -312,6 +330,8 @@ def add_tracking_codes(sender, request=None, **kwargs):
     if request is None:
         return ""
 
+    remember_campaign(request)
+
     config = {
         'meta_pixel_id': get_setting(event, 'meta_pixel_id'),
         'ga4_id': get_setting(event, 'ga4_id'),
@@ -374,12 +394,10 @@ def store_attribution(sender, request=None, **kwargs):
     data['consent'] = marketing_consent_given(request)
     data['consent_not_required'] = not require_consent()
     data['url'] = request.build_absolute_uri()[:1000]
-    for key in ('utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid'):
-        value = request.GET.get(key) or request.session.get('_tracking_' + key)
+    for key in CAMPAIGN_KEYS:
+        value = request.GET.get(key) or request.session.get(SESSION_CAMPAIGN % key)
         if value:
             data[key] = str(value)[:255]
-            # Keep it for the rest of the checkout: the UTMs are on the landing page, not here.
-            request.session['_tracking_' + key] = data[key]
     return {'_tracking': data}
 
 
