@@ -235,9 +235,13 @@ def page_events(request, event):
     name, events = url.url_name, []
     content = {'content_type': 'product', 'content_ids': [event.slug], 'content_name': str(event.name)}
 
-    if request.session.pop(SESSION_KEY_ADDTOCART, None):
+    if name != 'event.cart.add' and request.session.pop(SESSION_KEY_ADDTOCART, None):
         # Emitted here rather than on the POST itself: the add-to-cart request answers with a
         # redirect, and a redirect renders no page for the pixel to run on.
+        #
+        # Adding to the cart is asynchronous, so the redirect first lands on a waiting page that is
+        # still ``event.cart.add``. Firing there would burn the event on a page the browser leaves
+        # before the beacon can go out — which is exactly what happened the first time round.
         cart = {**content}
         try:
             from pretix.presale.views import get_cart
