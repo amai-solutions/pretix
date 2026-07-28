@@ -53,6 +53,10 @@ RAW_KEYS = {'head_html', 'meta_capi_token', 'meta_api_version'}
 # Marks that this visitor already got an InitiateCheckout for the checkout they are in.
 SESSION_KEY_CHECKOUT = '_tracking_checkout_started'
 
+# Adding to the cart is a POST that redirects, so there is no page render to hang the event on.
+# The redirect is flagged here and the event is emitted on the page the visitor lands on.
+SESSION_KEY_ADDTOCART = '_tracking_pending_add_to_cart'
+
 # Written by our own script once the visitor answers the consent dialog, because consent itself
 # lives in localStorage and the server has no way to read that.
 CONSENT_COOKIE = 'pretix_tracking_consent'
@@ -231,6 +235,21 @@ def page_events(request, event):
     name, events = url.url_name, []
     content = {'content_type': 'product', 'content_ids': [event.slug], 'content_name': str(event.name)}
 
+    if request.session.pop(SESSION_KEY_ADDTOCART, None):
+        # Emitted here rather than on the POST itself: the add-to-cart request answers with a
+        # redirect, and a redirect renders no page for the pixel to run on.
+        cart = {**content}
+        try:
+            from pretix.presale.views import get_cart
+
+            positions = list(get_cart(request))
+            cart['value'] = round(float(sum(p.price for p in positions)), 2)
+            cart['currency'] = event.currency
+            cart['num_items'] = len(positions)
+        except Exception:
+            logger.exception('Could not read the cart for AddToCart')
+        events.append({'type': 'AddToCart', 'data': cart})
+
     if name == 'event.index':
         events.append({'type': 'ViewContent', 'data': content})
     elif name in ('event.checkout', 'event.checkout.start'):
@@ -339,6 +358,8 @@ def send_server_side(event, request, page_evs, pixel_id, token):
                 'content_type': ev['data']['content_type'],
                 'content_ids': ev['data']['content_ids'],
                 'content_name': ev['data']['content_name'],
+                **({'value': ev['data']['value'], 'currency': ev['data']['currency']}
+                   if 'value' in ev['data'] else {}),
             },
         }
         try:
@@ -398,6 +419,14 @@ def extend_csp(sender, request=None, response=None, **kwargs):
     executes and every vendor request is blocked, which looks exactly like a pixel that "does not
     fire" with nothing in the logs to explain it.
     """
+    if request is not None and response is not None:
+        match = getattr(request, 'resolver_match', None)
+        if (match is not None and match.url_name == 'event.cart.add'
+                and 300 <= response.status_code < 400 and hasattr(request, 'session')):
+            # A successful add-to-cart always answers with a redirect; anything else is an error
+            # the visitor never got past, so it is not a cart addition.
+            request.session[SESSION_KEY_ADDTOCART] = True
+
     vendors = configured_vendors(sender)
     if not vendors or request is None or response is None:
         return response
@@ -509,7 +538,7 @@ TEMPLATE = """
                 content_ids: ev.data.content_ids,
                 content_name: ev.data.content_name
             };
-            if (ev.type === "Purchase") {
+            if (ev.type === "Purchase" || ev.type === "AddToCart") {
                 d.value = ev.data.value;
                 d.currency = ev.data.currency;
             }
@@ -538,6 +567,12 @@ TEMPLATE = """
             if (ev.type === "Purchase") {
                 gtag("event", "purchase", {
                     transaction_id: ev.data.order,
+                    value: ev.data.value,
+                    currency: ev.data.currency,
+                    items: [{item_id: ev.data.content_ids[0], item_name: ev.data.content_name}]
+                });
+            } else if (ev.type === "AddToCart") {
+                gtag("event", "add_to_cart", {
                     value: ev.data.value,
                     currency: ev.data.currency,
                     items: [{item_id: ev.data.content_ids[0], item_name: ev.data.content_name}]
