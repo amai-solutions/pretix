@@ -34,9 +34,10 @@ class TrackingApp(AppConfig):
         author = "AMAI"
         version = version
         category = "INTEGRATION"
-        description = _("Embeds Meta Pixel, Google Analytics 4, Google Ads and Google Tag Manager in the ticket shop. "
-                        "IDs are read from the server configuration (environment variables) and can be overridden per "
-                        "event. All tags respect the cookie consent dialog.")
+        description = _("Embeds Meta Pixel, Google Analytics 4, Google Ads and Google Tag Manager in the ticket shop, "
+                        "and mirrors the funnel to the Meta Conversions API server-side with shared event IDs so the "
+                        "pair is deduplicated. IDs are read from the server configuration (environment variables) and "
+                        "can be overridden per event. All tags respect the cookie consent dialog.")
 
     def ready(self):
-        from . import signals  # NOQA
+        from . import capi, signals  # NOQA

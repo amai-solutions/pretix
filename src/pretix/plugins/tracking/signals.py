@@ -23,11 +23,18 @@ import json
 import logging
 import re
 
+import time
+
 from django.conf import settings as django_settings
 from django.dispatch import receiver
 
+from pretix.base.signals import order_paid
 from pretix.presale.cookies import CookieProvider, UsageClass
-from pretix.presale.signals import html_head, register_cookie_providers
+from pretix.presale.signals import (
+    html_head, order_meta_from_request, register_cookie_providers,
+)
+
+from .capi import capi_purchase, capi_send, new_event_id
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +42,17 @@ logger = logging.getLogger(__name__)
 # Anything else is dropped and logged instead of being embedded.
 ID_RE = re.compile(r'^[A-Za-z0-9_\-]{1,64}$')
 
+# Settings that are not tag IDs and must skip the ID_RE check: free-form HTML and the
+# Conversions API token (200+ characters of base64-ish text). None of these are ever
+# rendered into the page except head_html.
+RAW_KEYS = {'head_html', 'meta_capi_token', 'meta_api_version'}
+
 # Marks that this visitor already got an InitiateCheckout for the checkout they are in.
 SESSION_KEY_CHECKOUT = '_tracking_checkout_started'
+
+# Written by our own script once the visitor answers the consent dialog, because consent itself
+# lives in localStorage and the server has no way to read that.
+CONSENT_COOKIE = 'pretix_tracking_consent'
 
 # setting key -> cookie provider identifier the consent dialog uses
 VENDOR_OF_SETTING = {
@@ -82,7 +98,7 @@ def get_setting(event, key):
     if not value:
         value = django_settings.CONFIG_FILE.get('tracking', key, fallback='')
     value = (value or '').strip()
-    if not value or key == 'head_html':
+    if not value or key in RAW_KEYS:
         return value
     if not ID_RE.match(value):
         logger.warning('Ignoring tracking setting %s: %r is not a valid tag ID', key, value)
@@ -99,14 +115,39 @@ def configured_vendors(event):
     return vendors
 
 
+def require_consent():
+    """Whether tags must wait for an explicit yes. Off is a deliberate operator decision."""
+    return str(
+        django_settings.CONFIG_FILE.get('tracking', 'require_consent', fallback='on')
+    ).lower() not in ('off', 'false', '0', 'no')
+
+
+def marketing_consent_given(request):
+    """Read the consent our own script mirrored into a cookie.
+
+    The consent dialog stores its answer in localStorage, which the server cannot see. Without
+    this mirror the server-side events would fire for visitors who said no, so a missing cookie
+    is treated as "no".
+    """
+    if not require_consent():
+        return True
+    return request is not None and request.COOKIES.get(CONSENT_COOKIE) == '1'
+
+
 def _purchase_data(request, event):
-    """Order value for the Purchase/conversion event, read from the order the buyer just landed on."""
+    """Order value for the Purchase/conversion event, read from the order the buyer just landed on.
+
+    Only *paid* orders count. An unpaid bank-transfer order would otherwise be reported as a
+    conversion here and reported again by the Conversions API when the money actually arrives.
+    """
+    from pretix.base.models import Order
+
     kwargs = request.resolver_match.kwargs
     code, secret = kwargs.get('order'), kwargs.get('secret')
     if not code or not secret:
         return None
     order = event.orders.filter(code=code, secret=secret).first()
-    if not order:
+    if not order or order.status != Order.STATUS_PAID:
         return None
     return {
         'order': order.code,
@@ -143,7 +184,76 @@ def page_events(request, event):
         if purchase:
             request.session.pop(SESSION_KEY_CHECKOUT, None)
             events.append({'type': 'Purchase', 'data': {**content, **purchase}})
+
+    for ev in events:
+        # The order code is a stable id both sides can derive; everything else needs a fresh one.
+        ev['id'] = ev['data'].get('order') or new_event_id()
     return events
+
+
+def client_ip(request):
+    forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR') or ''
+
+
+def browser_identifiers(request):
+    """The Meta click/browser ids, plus what identifies this request to the Graph API."""
+    data = {
+        'ip': client_ip(request),
+        'ua': request.META.get('HTTP_USER_AGENT', '')[:500],
+        'fbp': request.COOKIES.get('_fbp', ''),
+        'fbc': request.COOKIES.get('_fbc', ''),
+    }
+    if not data['fbc'] and request.GET.get('fbclid'):
+        # No _fbc cookie yet on the very first page of a click-through, but the click id is right
+        # there in the URL and Meta accepts the documented fb.1.<ts>.<fbclid> form.
+        data['fbc'] = 'fb.1.%d.%s' % (int(time.time() * 1000), request.GET['fbclid'])
+    return {k: v for k, v in data.items() if v}
+
+
+def send_server_side(event, request, page_evs, pixel_id, token):
+    """Queue the server-side twin of every browser event except Purchase.
+
+    Purchase is deliberately left out: it is sent from the ``order_paid`` receiver instead, so it
+    reports the money rather than the page view, and it still carries the order code as event id.
+    """
+    test_code = get_setting(event, 'meta_test_event_code')
+    if getattr(event, 'testmode', False) and not test_code:
+        # Traffic on a test event must not train the real pixel.
+        return
+    api_version = get_setting(event, 'meta_api_version') or 'v21.0'
+    user_data = browser_identifiers(request)
+    source_url = request.build_absolute_uri()[:1000]
+    for ev in page_evs:
+        if ev['type'] == 'Purchase':
+            continue
+        payload = {
+            'event_name': ev['type'],
+            'event_time': int(time.time()),
+            'event_id': ev['id'],
+            'action_source': 'website',
+            'event_source_url': source_url,
+            'user_data': {
+                'client_ip_address': user_data.get('ip', ''),
+                'client_user_agent': user_data.get('ua', ''),
+                **{k: user_data[k] for k in ('fbp', 'fbc') if k in user_data},
+            },
+            'custom_data': {
+                'content_type': ev['data']['content_type'],
+                'content_ids': ev['data']['content_ids'],
+                'content_name': ev['data']['content_name'],
+            },
+        }
+        try:
+            capi_send.apply_async(kwargs={
+                'pixel_id': pixel_id, 'token': token, 'event': payload,
+                'test_event_code': test_code or None, 'api_version': api_version,
+            })
+        except Exception:
+            # A broker hiccup must never break the shop page the visitor is looking at.
+            logger.exception('Could not queue Meta CAPI event %s', ev['type'])
 
 
 @receiver(register_cookie_providers, dispatch_uid="tracking_cookie_providers")
@@ -166,17 +276,55 @@ def add_tracking_codes(sender, request=None, **kwargs):
         'google_ads_id': get_setting(event, 'google_ads_id'),
         'google_ads_conversion_label': get_setting(event, 'google_ads_conversion_label'),
         'gtm_id': get_setting(event, 'gtm_id'),
-        'require_consent': str(
-            django_settings.CONFIG_FILE.get('tracking', 'require_consent', fallback='on')
-        ).lower() not in ('off', 'false', '0', 'no'),
+        'require_consent': require_consent(),
+        'consent_cookie': CONSENT_COOKIE,
         'events': page_events(request, event),
     }
     if not any(config[k] for k in ('meta_pixel_id', 'ga4_id', 'google_ads_id', 'gtm_id')):
         head_html = get_setting(event, 'head_html')
         return head_html or ""
 
+    capi_token = get_setting(event, 'meta_capi_token')
+    if config['meta_pixel_id'] and capi_token and config['events'] and marketing_consent_given(request):
+        send_server_side(event, request, config['events'], config['meta_pixel_id'], capi_token)
+
     payload = json.dumps(config).replace('</', '<\\/')
     return TEMPLATE.replace('__CONFIG__', payload) + get_setting(event, 'head_html')
+
+
+@receiver(order_meta_from_request, dispatch_uid="tracking_order_meta")
+def store_attribution(sender, request=None, **kwargs):
+    """Freeze the campaign identifiers onto the order while we still have the browser.
+
+    ``order_paid`` can fire days later from a cron or a webhook, with no request and no cookies,
+    so whatever the Conversions API will need has to be captured here.
+    """
+    if request is None:
+        return {}
+    data = browser_identifiers(request)
+    data['consent'] = marketing_consent_given(request)
+    data['consent_not_required'] = not require_consent()
+    data['url'] = request.build_absolute_uri()[:1000]
+    for key in ('utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid'):
+        value = request.GET.get(key) or request.session.get('_tracking_' + key)
+        if value:
+            data[key] = str(value)[:255]
+            # Keep it for the rest of the checkout: the UTMs are on the landing page, not here.
+            request.session['_tracking_' + key] = data[key]
+    return {'_tracking': data}
+
+
+@receiver(order_paid, dispatch_uid="tracking_order_paid_capi")
+def order_paid_capi(sender, order=None, **kwargs):
+    """The conversion that matters. Sent server-side so ad blockers cannot drop it."""
+    if order is None:
+        return
+    if not get_setting(sender, 'meta_pixel_id') or not get_setting(sender, 'meta_capi_token'):
+        return
+    try:
+        capi_purchase.apply_async(kwargs={'order_pk': order.pk})
+    except Exception:
+        logger.exception('Could not queue Meta CAPI Purchase for order %s', order.code)
 
 
 TEMPLATE = """
@@ -222,11 +370,10 @@ TEMPLATE = """
             if (ev.type === "Purchase") {
                 d.value = ev.data.value;
                 d.currency = ev.data.currency;
-                // Same event_id server-side, so the Conversions API can deduplicate.
-                fbq("track", "Purchase", d, {eventID: ev.data.order});
-                return;
             }
-            fbq("track", ev.type, d);
+            // Same event_id server-side, so the Conversions API deduplicates the pair
+            // instead of counting the same action twice.
+            fbq("track", ev.type, d, {eventID: ev.id});
         });
     }
 
@@ -289,7 +436,17 @@ TEMPLATE = """
         document.head.appendChild(s);
     }
 
+    function rememberConsent(consent) {
+        // The dialog keeps its answer in localStorage, which the server cannot read. Mirroring
+        // just the marketing bit into a cookie is what lets the Conversions API know whether it
+        // is allowed to fire. Storing a consent choice is itself a strictly necessary cookie.
+        var allowed = vendorAllowed(consent, "meta_pixel") ? "1" : "0";
+        document.cookie = cfg.consent_cookie + "=" + allowed + ";path=/;max-age=31536000;SameSite=Lax"
+            + (location.protocol === "https:" ? ";Secure" : "");
+    }
+
     function apply(consent) {
+        rememberConsent(consent);
         if (loaded) return;
         var any = false;
         if (cfg.meta_pixel_id && vendorAllowed(consent, "meta_pixel")) { loadMetaPixel(); any = true; }
