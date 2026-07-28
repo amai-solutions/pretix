@@ -33,7 +33,7 @@ from pretix.base.middleware import _merge_csp, _parse_csp, _render_csp
 from pretix.base.signals import order_paid
 from pretix.presale.cookies import CookieProvider, UsageClass
 from pretix.presale.signals import (
-    html_head, order_meta_from_request, process_response,
+    global_html_head, html_head, order_meta_from_request, process_response,
     register_cookie_providers,
 )
 
@@ -60,8 +60,25 @@ CONSENT_COOKIE = 'pretix_tracking_consent'
 # Campaign parameters ride on the landing URL, never on the checkout page where the order is
 # finally created, so they have to be stashed the moment they are first seen or the attribution
 # is gone by the time the order exists.
-CAMPAIGN_KEYS = ('utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid')
+#
+# The click identifiers matter as much as the utm_*: they are what each ad platform matches a sale
+# back to its own click, and unlike the utm_* they are not guesswork.
+CAMPAIGN_KEYS = (
+    'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'utm_id',
+    'gclid', 'gbraid', 'wbraid',      # Google Ads (the braid pair covers iOS app-to-web)
+    'fbclid',                          # Meta
+    'ttclid',                          # TikTok
+    'msclkid',                         # Microsoft Ads
+    'li_fat_id',                       # LinkedIn
+    'twclid',                          # X / Twitter
+    'epik',                            # Pinterest
+)
 SESSION_CAMPAIGN = '_tracking_%s'
+
+# Where the visitor came in and from where. Written once per session: overwriting them on a later
+# page would turn "landed on /bogota from an Instagram ad" into "landed on the checkout".
+SESSION_LANDING = '_tracking_landing_url'
+SESSION_REFERRER = '_tracking_referrer'
 
 # pretix ships a strict Content-Security-Policy: script-src is 'self' with no 'unsafe-inline'.
 # Without the entries below the tag script is refused by the browser before it runs a single line,
@@ -247,15 +264,27 @@ def client_ip(request):
 
 
 def remember_campaign(request):
-    """Stash campaign parameters the first time they are seen.
+    """Stash campaign parameters and the entry point the first time they are seen.
 
-    Called from ``html_head``, which runs on every shop page, so a visitor who lands with
-    ``?utm_source=…`` still carries it three pages later when the order is created.
+    Called from ``global_html_head``, which runs on *every* frontend page — including the organizer
+    listing, which is not tied to any event — so a visitor who lands with ``?utm_source=…`` still
+    carries it however many pages later the order is created.
+
+    The parameters follow last-click: arriving again through a different ad reassigns the sale to
+    that ad. The landing URL and referrer are first-touch and never overwritten.
     """
+    if not hasattr(request, 'session'):
+        return
     for key in CAMPAIGN_KEYS:
         value = request.GET.get(key)
         if value and request.session.get(SESSION_CAMPAIGN % key) != value:
             request.session[SESSION_CAMPAIGN % key] = str(value)[:255]
+
+    if not request.session.get(SESSION_LANDING):
+        request.session[SESSION_LANDING] = request.build_absolute_uri()[:1000]
+        referrer = request.META.get('HTTP_REFERER', '')
+        if referrer:
+            request.session[SESSION_REFERRER] = referrer[:1000]
 
 
 def browser_identifiers(request):
@@ -330,8 +359,6 @@ def add_tracking_codes(sender, request=None, **kwargs):
     if request is None:
         return ""
 
-    remember_campaign(request)
-
     config = {
         'meta_pixel_id': get_setting(event, 'meta_pixel_id'),
         'ga4_id': get_setting(event, 'ga4_id'),
@@ -381,6 +408,19 @@ def extend_csp(sender, request=None, response=None, **kwargs):
     return response
 
 
+@receiver(global_html_head, dispatch_uid="tracking_campaign_capture")
+def capture_campaign_everywhere(sender, request=None, **kwargs):
+    """Catch the campaign parameters on any frontend page, not just event pages.
+
+    ``html_head`` is an event signal, so a visitor whose first stop is the organizer listing —or any
+    page of an event without the plugin— would arrive at the checkout with the attribution already
+    lost. This one fires everywhere and emits nothing.
+    """
+    if request is not None:
+        remember_campaign(request)
+    return ""
+
+
 @receiver(order_meta_from_request, dispatch_uid="tracking_order_meta")
 def store_attribution(sender, request=None, **kwargs):
     """Freeze the campaign identifiers onto the order while we still have the browser.
@@ -394,6 +434,10 @@ def store_attribution(sender, request=None, **kwargs):
     data['consent'] = marketing_consent_given(request)
     data['consent_not_required'] = not require_consent()
     data['url'] = request.build_absolute_uri()[:1000]
+    if request.session.get(SESSION_LANDING):
+        data['landing_url'] = request.session[SESSION_LANDING]
+    if request.session.get(SESSION_REFERRER):
+        data['referrer'] = request.session[SESSION_REFERRER]
     for key in CAMPAIGN_KEYS:
         value = request.GET.get(key) or request.session.get(SESSION_CAMPAIGN % key)
         if value:
