@@ -167,6 +167,9 @@ def _default_context(request):
 
     if request.resolver_match and hasattr(request, 'organizer'):
         ctx['organizer_logo'] = request.organizer.settings.get('organizer_logo_image', as_type=str, default='')[7:]
+        # The organizer page used to share its logo cropped to a 120 px strip. An organizer that
+        # has a proper social image deserves to have it used, exactly as an event does.
+        ctx['organizer_og_image'] = request.organizer.settings.get('og_image', as_type=str, default='')[7:]
         ctx['organizer_homepage_text'] = request.organizer.settings.get('organizer_homepage_text', as_type=LazyI18nString)
         ctx['organizer'] = request.organizer
         _footer += request.organizer.cache.get_or_set('footer_links', lambda: [
