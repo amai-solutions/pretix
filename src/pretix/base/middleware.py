@@ -323,6 +323,11 @@ class SecurityMiddleware(MiddlewareMixin):
             h['connect-src'].append('https://google.com/pay')
             h['connect-src'].append('https://www.google.com/pay')
             h['connect-src'].append('https://pay.google.com')
+            # Y el ultimo salto es una IMAGEN: el manifiesto declara su icono en gstatic, y el
+            # navegador descarta el metodo de pago entero si no puede descargarlo
+            # («Failed to download or decode a non-empty icon for payment app»). Un icono
+            # bloqueado no degrada el boton: lo borra.
+            h['img-src'].append('https://www.gstatic.com')
         if settings.LOG_CSP:
             h['report-uri'] = ["/csp_report/"]
         if 'Content-Security-Policy' in resp:
