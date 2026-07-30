@@ -3570,6 +3570,29 @@ Your {organizer} team"""))  # noqa: W291
             label=_('Link back to organizer overview on all event pages'),
         )
     },
+    'organizer_link_back_url': {
+        'default': None,
+        'type': str,
+        'form_class': forms.URLField,
+        'serializer_class': serializers.URLField,
+        'form_kwargs': dict(
+            label=_('External link back URL'),
+            help_text=_('If you fill this in, the link back points here instead of the organizer overview. Use it '
+                        'to send visitors back to your own website, where they can see the whole programme.'),
+        )
+    },
+    'organizer_link_back_label': {
+        'default': '',
+        'type': LazyI18nString,
+        'serializer_class': I18nField,
+        'form_class': I18nFormField,
+        'form_kwargs': dict(
+            label=_('External link back label'),
+            widget=I18nTextInput,
+            help_text=_('The wording of the link back when it points to an external URL. Leave empty to use the '
+                        'default wording.'),
+        )
+    },
     'organizer_homepage_text': {
         'default': '',
         'type': LazyI18nString,

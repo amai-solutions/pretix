@@ -580,6 +580,8 @@ class OrganizerSettingsSerializer(SettingsSerializer):
         'event_list_availability',
         'organizer_homepage_text',
         'organizer_link_back',
+        'organizer_link_back_url',
+        'organizer_link_back_label',
         'organizer_logo_image_large',
         'giftcard_length',
         'giftcard_expiry_years',

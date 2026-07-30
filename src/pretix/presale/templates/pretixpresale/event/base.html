@@ -62,11 +62,23 @@
         {% endif %}
         {% if request.event.settings.organizer_link_back %}
             <div class="pull-left header-part flip hidden-print">
-                <a href="{% abseventurl request.organizer "presale:organizer.index" %}">
-                    &laquo; {% blocktrans trimmed with name=request.organizer.name %}
-                    Show all events of {{ name }}
-                {% endblocktrans %}
-                </a>
+                {% if request.event.settings.organizer_link_back_url %}
+                    <a href="{{ request.event.settings.organizer_link_back_url }}">
+                        &laquo; {% if request.event.settings.organizer_link_back_label %}
+                            {{ request.event.settings.organizer_link_back_label }}
+                        {% else %}
+                            {% blocktrans trimmed with name=request.organizer.name %}
+                                Show all events of {{ name }}
+                            {% endblocktrans %}
+                        {% endif %}
+                    </a>
+                {% else %}
+                    <a href="{% abseventurl request.organizer "presale:organizer.index" %}">
+                        &laquo; {% blocktrans trimmed with name=request.organizer.name %}
+                        Show all events of {{ name }}
+                    {% endblocktrans %}
+                    </a>
+                {% endif %}
             </div>
         {% endif %}
         <div class="clearfix"></div>
