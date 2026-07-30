@@ -94,6 +94,9 @@ CSP_BY_VENDOR = {
         'script-src': ['https://connect.facebook.net'],
         'img-src': ['https://www.facebook.com', 'https://connect.facebook.net'],
         'connect-src': ['https://www.facebook.com', 'https://connect.facebook.net'],
+        # fbevents.js monta ademas un iframe contra www.facebook.com. Sin esta entrada el navegador
+        # lo rechaza y deja un error de CSP en cada pagina de la tienda.
+        'frame-src': ['https://www.facebook.com'],
     },
     'google_analytics': {
         'script-src': ['https://www.googletagmanager.com'],
