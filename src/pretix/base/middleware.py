@@ -316,7 +316,11 @@ class SecurityMiddleware(MiddlewareMixin):
         ):
             h['script-src'].append('https://pay.google.com')
             h['frame-src'].append('https://pay.google.com')
+            # El manifiesto de pago que descarga el navegador vive en www.google.com/pay, no en
+            # google.com/pay. Con solo el segundo, la CSP tumba la descarga y el boton de Google Pay
+            # no llega a aparecer aunque Stripe lo anuncie en la etiqueta del metodo.
             h['connect-src'].append('https://google.com/pay')
+            h['connect-src'].append('https://www.google.com/pay')
         if settings.LOG_CSP:
             h['report-uri'] = ["/csp_report/"]
         if 'Content-Security-Policy' in resp:
