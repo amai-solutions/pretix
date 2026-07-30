@@ -46,7 +46,7 @@
                 </div>
             {% endif %}
             <div class="checkout-button-row">
-                <form class="checkout-button-primary" method="get" action="{% eventurl request.event "presale:event.checkout.start" cart_namespace=cart_namespace  %}">
+                <form class="checkout-button-primary" method="get" id="cart-checkout-form" action="{% eventurl request.event "presale:event.checkout.start" cart_namespace=cart_namespace  %}">
                     <p><button class="btn btn-primary btn-lg" type="submit"{% if has_addon_choices or cart.total == 0 %} aria-label="{% trans "Continue with order process" %}"{% endif %}>
                         <i class="fa fa-shopping-cart" aria-hidden="true"></i>
                         {% if has_addon_choices or cart.total == 0 %}

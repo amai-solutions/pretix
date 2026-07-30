@@ -14,6 +14,7 @@
     "use strict";
 
     var FORM_ID = "cart-add-form";
+    var CHECKOUT_FORM_ID = "cart-checkout-form";
     var UMBRAL_SCROLL = 8;  // px; por debajo de esto es temblor de dedo, no intencion
 
     function alEstarLista(fn) {
@@ -71,11 +72,32 @@
      * importar si el comprador aun no ha bajado hasta el o si ya lo ha pasado.
      * En los dos casos la accion deja de estar a un dedo de distancia, que es lo
      * unico que esta barra viene a arreglar.
+     *
+     * Cual es "el boton de verdad" depende de si ya hay carrito. Con la cesta
+     * llena, la accion de la pagina ya no es anadir sino pagar: si la barra
+     * siguiera ofreciendo "anadir al carrito" invitaria a meter una segunda
+     * entrada sin querer justo cuando lo que toca es terminar. Por eso se mira
+     * primero el boton de la caja del carrito y solo si no hay se cae al de
+     * anadir. La etiqueta se copia del original, asi que tambien acierta cuando
+     * pretix escribe "Continuar" en vez de "Proceder con la compra".
      */
     function montarComprar() {
-        var boton = document.getElementById("btn-add-to-cart");
-        var formulario = document.getElementById(FORM_ID);
-        if (!boton || !formulario || !("IntersectionObserver" in window)) {
+        if (!("IntersectionObserver" in window)) {
+            return;
+        }
+
+        var origen = null;
+        var formulario = null;
+
+        var pagar = document.querySelector("#" + CHECKOUT_FORM_ID + " button[type=submit]");
+        if (pagar) {
+            origen = pagar;
+            formulario = CHECKOUT_FORM_ID;
+        } else if (document.getElementById("btn-add-to-cart") && document.getElementById(FORM_ID)) {
+            origen = document.getElementById("btn-add-to-cart");
+            formulario = FORM_ID;
+        }
+        if (!origen) {
             return;
         }
 
@@ -85,8 +107,11 @@
         var copia = document.createElement("button");
         copia.type = "submit";
         copia.className = "btn btn-block btn-primary btn-lg";
-        copia.setAttribute("form", FORM_ID);
-        copia.innerHTML = boton.innerHTML;
+        copia.setAttribute("form", formulario);
+        copia.innerHTML = origen.innerHTML;
+        if (origen.hasAttribute("aria-label")) {
+            copia.setAttribute("aria-label", origen.getAttribute("aria-label"));
+        }
         barra.appendChild(copia);
 
         document.body.appendChild(barra);
@@ -96,7 +121,7 @@
             entradas.forEach(function (entrada) {
                 barra.classList.toggle("is-visible", !entrada.isIntersecting);
             });
-        }, {threshold: 0}).observe(boton);
+        }, {threshold: 0}).observe(origen);
     }
 
     alEstarLista(function () {
