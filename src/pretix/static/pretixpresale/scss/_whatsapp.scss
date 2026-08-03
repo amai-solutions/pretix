@@ -20,6 +20,15 @@
    criterio que en la web de marketing (desviacion G-6).
    ========================================================================== */
 .az-whatsapp-bar {
+    /* OBLIGATORIO, Y NO ES COSMETICO. La barra de enlaces de la cabecera de pretix
+     * (`.page-header-links`) NO contiene su propio flotado: medida en produccion,
+     * la caja del contenedor da 20 px con un hijo `float: left` de 40. El defecto
+     * es suyo y es viejo; no se notaba porque lo que venia detras traia margen
+     * propio y absorbia la diferencia. Esta franja no lo absorbe: sin `clear` se
+     * pintaba ENCIMA de «Ver la gira y las 5 ciudades», 9 px de solape medidos.
+     * Se arregla desde aqui a proposito: tocar el clearfix de pretix moveria
+     * cajas en paginas que no son mias. */
+    clear: both;
     background: #eaf1f8;
     border-bottom: 1px solid #d3e0ee;
     padding: 8px 15px;
