@@ -20,15 +20,24 @@
    criterio que en la web de marketing (desviacion G-6).
    ========================================================================== */
 .az-whatsapp-bar {
-    /* OBLIGATORIO, Y NO ES COSMETICO. La barra de enlaces de la cabecera de pretix
-     * (`.page-header-links`) NO contiene su propio flotado: medida en produccion,
-     * la caja del contenedor da 20 px con un hijo `float: left` de 40. El defecto
-     * es suyo y es viejo; no se notaba porque lo que venia detras traia margen
-     * propio y absorbia la diferencia. Esta franja no lo absorbe: sin `clear` se
-     * pintaba ENCIMA de «Ver la gira y las 5 ciudades», 9 px de solape medidos.
-     * Se arregla desde aqui a proposito: tocar el clearfix de pretix moveria
-     * cajas en paginas que no son mias. */
-    clear: both;
+    /* LOS 20 px DE ARRIBA NO SON AIRE: DEVUELVEN UN MARGEN NEGATIVO DE PRETIX.
+     *
+     * Con banner grande (`.page-header.logo-large`, que es nuestro caso) pretix
+     * mete los enlaces de cabecera DENTRO del banner con
+     * `margin-bottom: calc(-20px * var(--pretix-body-bg-white-0))`. Es
+     * deliberado, no un defecto: lo que venga detras tiene que absorber esos
+     * 20 px. Esta franja no los absorbia y se pintaba ENCIMA de «Ver la gira y
+     * las 5 ciudades» — 9 px de solape medidos a 1024 y 1280.
+     *
+     * Se devuelven con la MISMA expresion, no con un numero a ojo: asi en un
+     * tema de fondo blanco —donde la variable vale 0 y el margen negativo no
+     * existe— esto tambien vale 0 y no sobra aire.
+     *
+     * Y NO ES `clear`. Lo probe: ni `display: flow-root` ni `overflow: auto` en
+     * `.page-header-links` mueven un pixel, porque no hay ningun flotado
+     * escapandose. Diagnostique mal a la primera y el CSS que lo "arreglaba" no
+     * arreglaba nada. */
+    margin-top: calc(20px * var(--pretix-body-bg-white-0));
     background: #eaf1f8;
     border-bottom: 1px solid #d3e0ee;
     padding: 8px 15px;
