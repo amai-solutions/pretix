@@ -1,0 +1,75 @@
+/* ==========================================================================
+   Franja de contacto por WhatsApp
+
+   POR QUE UNA FRANJA Y NO UNA BURBUJA FLOTANTE. La burbuja de la esquina es lo
+   habitual, y aqui seria un defecto: en movil esta tienda YA ancla abajo la
+   barra de comprar (`_stickybars.scss`), que es la accion de la pagina. Una
+   burbuja en esa esquina o la tapa o se tapa. La franja va en flujo normal, no
+   pelea con nada y se ve en TODAS las paginas de la tienda —listado del
+   organizador incluido— porque cuelga del `base.html` comun.
+
+   LOS COLORES SON PROPIOS Y NO SE HEREDAN, A PROPOSITO. La tienda tiene un
+   fondo de tema configurable, y `--pretix-body-bg` y el color de texto del
+   cuerpo NO son un par: un elemento que pinte el fondo del tema y herede el
+   color del cuerpo da 1,2:1 (ya paso con las cabeceras). Aqui el par se declara
+   entero —crema claro + navy profundo, 10,4:1 medido— y deja de depender de lo
+   que alguien configure manana en el panel.
+
+   EL VERDE OFICIAL VA SOLO EN EL GLIFO. #25D366 sobre este crema da 2,3:1:
+   suficiente para una forma reconocible, insuficiente para texto. Mismo
+   criterio que en la web de marketing (desviacion G-6).
+   ========================================================================== */
+.az-whatsapp-bar {
+    background: #eaf1f8;
+    border-bottom: 1px solid #d3e0ee;
+    padding: 8px 15px;
+    text-align: center;
+    line-height: 1.35;
+}
+
+.az-whatsapp-bar a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    /* Objetivo tactil de pleno derecho en los dos ejes: la franja es estrecha y
+     * sin esto el enlace se queda en la altura de la letra. */
+    min-height: 44px;
+    padding: 0 10px;
+    color: #123a63;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.az-whatsapp-bar a:hover,
+.az-whatsapp-bar a:focus {
+    color: #0b2745;
+    text-decoration: underline;
+}
+
+.az-whatsapp-bar .az-whatsapp-glyph {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    color: #25d366;
+}
+
+/* El numero es el dato; la invitacion es el envoltorio. En pantallas estrechas
+ * la invitacion se calla y se queda el numero, que es lo unico que no se puede
+ * deducir. Asi la franja nunca pasa de una linea. */
+.az-whatsapp-bar .az-whatsapp-lead {
+    font-weight: 400;
+}
+
+@media (max-width: 480px) {
+    .az-whatsapp-bar .az-whatsapp-lead {
+        display: none;
+    }
+}
+
+/* La franja es informacion, no decoracion: en papel sobra. */
+@media print {
+    .az-whatsapp-bar {
+        display: none;
+    }
+}
