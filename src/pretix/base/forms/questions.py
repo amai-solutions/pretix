@@ -785,7 +785,19 @@ class BaseQuestionsForm(forms.Form):
                 del self.data[fprefix + 'state']
 
             add_fields['state'] = forms.ChoiceField(
-                label=pgettext_lazy('address', 'State'),
+                label=format_lazy(
+                    '{estado} / {provincia}',
+                    # DOS msgid QUE YA EXISTEN EN EL CATALOGO, no una cadena nueva. El cliente
+                    # pidio que el campo dijera «Estado / Provincia» (3-ago-2026): sus compradores
+                    # son de Mexico, Colombia, Argentina, EE.UU. y Espana, y «Estado» a secas solo
+                    # se entiende en la mitad. Componerlo con `pgettext_lazy('address', 'State')` y
+                    # `pgettext_lazy('address', 'Province')` —los dos traducidos ya— da «Estado /
+                    # Provincia» en espanol y «State / Province» en ingles SIN tocar los .po. Una
+                    # cadena nueva se habria pintado en ingles, que es como se cuela un rotulo a
+                    # medio traducir en la pagina donde la gente paga.
+                    estado=pgettext_lazy('address', 'State'),
+                    provincia=pgettext_lazy('address', 'Province'),
+                ),
                 required=False,
                 choices=c,
                 initial=state,
@@ -1219,7 +1231,19 @@ class BaseInvoiceAddressForm(forms.ModelForm):
             cc = str(self.initial['country'])
         elif self.instance and self.instance.country:
             cc = str(self.instance.country)
-        state_label = pgettext_lazy('address', 'State')
+        state_label = format_lazy(
+            '{estado} / {provincia}',
+            # DOS msgid QUE YA EXISTEN EN EL CATALOGO, no una cadena nueva. El cliente
+            # pidio que el campo dijera «Estado / Provincia» (3-ago-2026): sus compradores
+            # son de Mexico, Colombia, Argentina, EE.UU. y Espana, y «Estado» a secas solo
+            # se entiende en la mitad. Componerlo con `pgettext_lazy('address', 'State')` y
+            # `pgettext_lazy('address', 'Province')` —los dos traducidos ya— da «Estado /
+            # Provincia» en espanol y «State / Province» en ingles SIN tocar los .po. Una
+            # cadena nueva se habria pintado en ingles, que es como se cuela un rotulo a
+            # medio traducir en la pagina donde la gente paga.
+            estado=pgettext_lazy('address', 'State'),
+            provincia=pgettext_lazy('address', 'Province'),
+        )
         if cc and cc in COUNTRIES_WITH_STATE_IN_ADDRESS:
             types, form = COUNTRIES_WITH_STATE_IN_ADDRESS[cc]
             statelist = [s for s in pycountry.subdivisions.get(country_code=cc) if s.type in types]
