@@ -69,7 +69,18 @@ def _info(cc):
         'state': {
             'visible': cc in COUNTRIES_WITH_STATE_IN_ADDRESS,
             'required': 'if_any' if cc in COUNTRIES_WITH_STATE_IN_ADDRESS else False,
-            'label': COUNTRY_STATE_LABEL.get(cc, pgettext('address', 'State')),
+            # EL MISMO ROTULO QUE PINTA EL SERVIDOR EN `BaseInvoiceAddressForm`, Y NO
+            # ES UNA COPIA DECORATIVA: `addressform.js` PISA la etiqueta del HTML con
+            # lo que devuelva este JSON (`if ('label' in options) ... .text(...)`).
+            # Cambiar solo el formulario deja el rotulo bueno en el HTML servido y el
+            # viejo en la pantalla — comprobado en produccion: el HTML decia «Estado /
+            # Provincia» y el DOM, tras el JS, «Estado».
+            # Aqui se compone en caliente (`pgettext`, no lazy) porque estamos dentro
+            # de una peticion con el idioma ya activo.
+            'label': COUNTRY_STATE_LABEL.get(
+                cc,
+                f"{pgettext('address', 'State')} / {pgettext('address', 'Province')}",
+            ),
         },
         'vat_id': {
             'visible': cc in VAT_ID_COUNTRIES,
