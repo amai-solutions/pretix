@@ -888,6 +888,70 @@ class StripeMethod(BasePaymentProvider):
     def _payment_intent_kwargs(self, request, payment):
         return {}
 
+    def _comprador(self, payment):
+        """Quién ha pagado, para que el cobro no salga anónimo en el panel de Stripe.
+
+        POR QUÉ ESTO NO VIENE DE SERIE. pretix manda a Stripe lo justo para cobrar: importe,
+        moneda, una descripción (`BOGOTA-AXTXQ`) y tres metadatos internos. Ni nombre, ni correo,
+        ni ficha de cliente — no hay ningún ajuste que lo active, no está en el plugin. Es una
+        decisión de diseño suya: Stripe es el carril del dinero y el sistema de registro es pretix.
+        Defendible, y además minimiza los datos personales que salen hacia un tercero.
+
+        Aquí se cambia a propósito, pedido por el cliente el 5-ago-2026: quien mira la app de
+        Stripe quiere saber de quién es cada cobro sin ir a buscarlo a otro sitio.
+
+        DOS DECISIONES QUE NO SON DE ESTILO:
+
+        1. **Se crea `Customer`, NO se pone `receipt_email`.** El campo «Cliente» del panel se
+           rellena con el primero. El segundo lo rellenaría también, pero además autoriza a Stripe
+           a mandar SU PROPIO recibo al comprador: si algún día alguien activa los recibos en el
+           panel de Stripe, el comprador recibe dos correos por la misma compra y nadie relaciona
+           la causa. El nombre en el panel no vale ese riesgo.
+        2. **Un fallo aquí NUNCA tumba el cobro.** Esto es cosmética de trastienda; el pago es el
+           negocio. Si Stripe no acepta el `Customer` —o tarda, o cambia la API— se registra y se
+           sigue sin él. Por eso el `except` es ancho a propósito.
+
+        Devuelve `(metadatos, kwargs)` en vez de un solo diccionario porque los metadatos hay que
+        FUNDIRLOS con los que ya pone pretix, no sustituirlos: los suyos son los que usa su propio
+        soporte para encontrar un pedido.
+        """
+        pedido = payment.order
+        direccion = getattr(pedido, 'invoice_address', None)
+        nombre = (direccion.name or '').strip() if direccion else ''
+        if not nombre:
+            # Sin datos de facturación —que solo son obligatorios en Cancún— el nombre que hay es
+            # el del asistente, que sí se pide en los cinco eventos.
+            posicion = pedido.positions.first()
+            nombre = (posicion.attendee_name or '').strip() if posicion else ''
+
+        metadatos = {}
+        if nombre:
+            metadatos['nombre'] = nombre[:500]
+        if pedido.email:
+            metadatos['correo'] = pedido.email[:500]
+        if pedido.phone:
+            metadatos['telefono'] = str(pedido.phone)[:500]
+        if direccion and (direccion.company or '').strip():
+            metadatos['empresa'] = direccion.company.strip()[:500]
+
+        if not (nombre or pedido.email):
+            return metadatos, {}
+
+        try:
+            cliente = stripe.Customer.create(
+                name=nombre or None,
+                email=pedido.email or None,
+                phone=str(pedido.phone) if pedido.phone else None,
+                description='{}-{}'.format(self.event.slug.upper(), pedido.code),
+                metadata={'code': pedido.code, 'event': self.event.id},
+                # Sin esto el `Customer` se crearía en la cuenta equivocada cuando hay Connect.
+                **self.api_kwargs,
+            )
+            return metadatos, {'customer': cliente.id}
+        except Exception as e:                      # noqa: BLE001 — ver punto 2 del docstring
+            logger.warning('No se pudo crear el Customer de Stripe para %s: %s', pedido.code, e)
+            return metadatos, {}
+
     def _handle_payment_intent(self, request, payment, intent=None):
         self._init_api()
 
@@ -915,6 +979,8 @@ class StripeMethod(BasePaymentProvider):
                 else:
                     params['statement_descriptor'] = self.statement_descriptor(payment)
 
+                meta_comprador, kwargs_comprador = self._comprador(payment)
+
                 intent = stripe.PaymentIntent.create(
                     amount=self._get_amount(payment),
                     currency=self.event.currency.lower(),
@@ -929,8 +995,10 @@ class StripeMethod(BasePaymentProvider):
                     metadata={
                         'order': str(payment.order.id),
                         'event': self.event.id,
-                        'code': payment.order.code
+                        'code': payment.order.code,
+                        **meta_comprador,
                     },
+                    **kwargs_comprador,
                     # TODO: Is this sufficient?
                     idempotency_key=str(self.event.id) + payment.order.code + idempotency_key_seed,
                     return_url=eventreverse_absolute(self.event, 'plugins:stripe:sca.return', kwargs={
