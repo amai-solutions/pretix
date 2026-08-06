@@ -1,0 +1,45 @@
+/* ==========================================================================
+   El precio de la entrada, legible de un vistazo
+
+   POR QUE EXISTE. El cliente reporto el 5-ago-2026 que «no sale el precio y no lo sabe hasta que
+   pone la cantidad y le da a comprar». El precio SI salia: estaba en su columna, en texto corrido
+   del mismo tamano y del mismo gris que la descripcion de la entrada, y encima escrito «EUR85,00»
+   —eso se arregla en `money.py`, es otro asunto—. En un movil, con la descripcion del pase encima
+   y el selector de cantidad al lado, esa cifra no gana la mirada: parece un dato mas de la ficha.
+
+   Un precio no compite con el resto del texto: es la respuesta a la unica pregunta que el
+   comprador se esta haciendo en ese momento. Se le da cuerpo, peso y la tinta de marca, y en movil
+   se le pone su propia linea por delante de la cantidad, que es el orden en que se decide: primero
+   cuanto cuesta, despues cuantas quiero.
+
+   No se toca la estructura de la plantilla —sigue siendo la columna `.price` de pretix— para que
+   una actualizacion de pretix no choque con esto.
+   ========================================================================== */
+.product-row .price,
+.variation .price {
+    font-size: 1.32em;
+    font-weight: 700;
+    line-height: 1.25;
+    color: #1f4578;
+    white-space: nowrap;
+}
+
+/* En pantalla estrecha las dos columnas caen a media fila cada una (`col-xs-6`), asi que el precio
+ * y el selector de cantidad comparten linea y el precio queda pegado a los botones. Se le da la
+ * fila entera y un poco de aire debajo: se lee ANTES de tocar nada, que es justo lo que se pidio. */
+@media (max-width: 767px) {
+    .product-row .price,
+    .variation .price {
+        width: 100%;
+        margin-bottom: 6px;
+        text-align: left;
+    }
+}
+
+/* El precio tachado de una oferta no debe gritar mas que el vigente. */
+.product-row .price del,
+.variation .price del {
+    font-size: 0.78em;
+    font-weight: 400;
+    opacity: 0.7;
+}

@@ -61,7 +61,17 @@ def money_filter(value: Decimal, arg='', hide_currency=False):
         return floatformat(value, f"{places}g")
 
     try:
-        locale = Locale(get_babel_locale())
+        # EL TERRITORIO DECIDE SI UNA MONEDA EXTRANJERA SE ESCRIBE CON SIMBOLO O CON CODIGO, Y AQUI
+        # ESO SOBRA. Los cinco eventos cobran en euros, pero cuatro estan en America: con la
+        # localizacion completa, CLDR escribe el euro como moneda ajena y el precio sale
+        # «EUR85,00» (es_AR, es_CO) o «EUR85.00» (es_MX) en vez de «85,00 €». Medido contra Babel,
+        # locale a locale. No es un fallo —es la regla del pais— pero el comprador no lee eso como
+        # un precio: el cliente reporto el 5-ago-2026 que «no sale el precio».
+        #
+        # Se formatea con el IDIOMA a secas. El idioma es quien decide coma o punto decimal y donde
+        # cae el simbolo, que es lo que hace legible la cifra; el territorio solo aportaba el
+        # codigo ISO. `es` -> «85,00 €», `en` -> «€85.00»: simbolo en los dos.
+        locale = Locale(str(get_babel_locale()).replace('-', '_').split('_')[0])
     except UnknownLocaleError:
         locale = "en"
 
