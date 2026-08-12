@@ -77,6 +77,42 @@ CAMPAIGN_KEYS = (
     'twclid',                          # X / Twitter
     'epik',                            # Pinterest
 )
+
+# ...but the list above is NOT the boundary any more: it only names the ones that also get special
+# treatment (the fbclid timestamp, the CAPI payload). ANY parameter that arrives is stored.
+#
+# Measured on 12-ago-2026 against production: an ad sends far more than the classic five. `ad_id`,
+# `adset_id`, `campaign_id`, `placement` and `site_source_name` are what an agency actually reads to
+# know which creative sold the ticket, and they were all being dropped on the floor. A closed list
+# goes stale every time a platform invents a parameter, and it goes stale in silence.
+#
+# The marketing site does exactly the same, with the same denylist — see `campaign.ts` there. If one
+# of the two filters and the other does not, the chain is only as wide as its narrowest link.
+FORBIDDEN_PARTS = (
+    'password', 'passwd', 'contrasena', 'token', 'secret', 'apikey', 'api_key', 'auth', 'session',
+    'jwt', 'otp', 'pin', 'cvv', 'iban', 'dni', 'nif',
+    'email', 'correo', 'mail', 'telefono', 'phone', 'movil',
+)
+MAX_CAMPAIGN_PARAMS = 40
+
+
+def campaign_params(request):
+    """Every campaign parameter on this request: the URL wins, the session fills the gaps.
+
+    Credentials and personal data never travel — a link gets shared on WhatsApp, and whatever is in
+    it would end up frozen on someone else's order.
+    """
+    out = {}
+    for key, value in request.GET.items():
+        k = key.lower()
+        if any(part in k for part in FORBIDDEN_PARTS):
+            continue
+        if not value or len(key) > 64:
+            continue
+        out[key] = str(value)[:255]
+        if len(out) >= MAX_CAMPAIGN_PARAMS:
+            break
+    return out
 SESSION_CAMPAIGN = '_tracking_%s'
 
 # Where the visitor came in and from where. Written once per session: overwriting them on a later
@@ -302,10 +338,15 @@ def remember_campaign(request):
     """
     if not hasattr(request, 'session'):
         return
-    for key in CAMPAIGN_KEYS:
-        value = request.GET.get(key)
-        if value and request.session.get(SESSION_CAMPAIGN % key) != value:
-            request.session[SESSION_CAMPAIGN % key] = str(value)[:255]
+    for key, value in campaign_params(request).items():
+        if request.session.get(SESSION_CAMPAIGN % key) != value:
+            request.session[SESSION_CAMPAIGN % key] = value
+            if key not in request.session.setdefault(SESSION_CAMPAIGN % '_keys', []):
+                # Se lleva un indice de lo guardado: sin el, al crear el pedido no habria forma de
+                # saber que claves hay en sesion mas alla de la lista fija.
+                request.session[SESSION_CAMPAIGN % '_keys'] = (
+                    request.session[SESSION_CAMPAIGN % '_keys'] + [key]
+                )
             if key == 'fbclid':
                 # Meta's _fbc cookie encodes when the click happened, and it is only written by the
                 # pixel. A click landing on a page without the pixel — the organizer listing — would
@@ -483,8 +524,12 @@ def store_attribution(sender, request=None, **kwargs):
         data['landing_url'] = request.session[SESSION_LANDING]
     if request.session.get(SESSION_REFERRER):
         data['referrer'] = request.session[SESSION_REFERRER]
-    for key in CAMPAIGN_KEYS:
-        value = request.GET.get(key) or request.session.get(SESSION_CAMPAIGN % key)
+    claves = set(CAMPAIGN_KEYS) | set(request.session.get(SESSION_CAMPAIGN % '_keys') or [])
+    data.update(campaign_params(request))
+    for key in claves:
+        if key in data:
+            continue
+        value = request.session.get(SESSION_CAMPAIGN % key)
         if value:
             data[key] = str(value)[:255]
 
