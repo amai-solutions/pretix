@@ -1,0 +1,11 @@
+{% load i18n %}{% if agotado %}El aforo de {{ evento }} se ha AGOTADO.{% else %}El aforo de {{ evento }} va por el {{ porcentaje }} %.{% endif %}
+
+Vendidas: {{ vendidas }} de {{ aforo }}
+Quedan:   {{ quedan }}
+
+Ver los pedidos:
+{{ url }}
+
+--
+Aviso automático de la tienda de entradas. Se envía una sola vez por cada tramo
+({{ umbrales }} %), no en cada compra.
